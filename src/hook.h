@@ -67,6 +67,8 @@ public:
 			   void **chain = 0,
 			   void **original = 0,
 			   void **trampoline = 0);
+  static Status lookup(const char *fn, const char *v, const char *lib,
+                       void *&sym);
 };
 
 inline IgHook::Status

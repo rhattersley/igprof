@@ -71,6 +71,7 @@ public:
   struct Counter;
   struct Resource;
   struct Record;
+  struct PyFrameState;
 
   /// Deepest supported stack depth.
   static const int MAX_DEPTH = 800;
@@ -86,6 +87,10 @@ public:
 
   /// A large-sized accumulated value for counters.
   typedef uintmax_t Value;
+
+  /// TODO Sort out circular dependency nonsense.
+  //typedef void (*Formatter)(IgProfDumpInfo *info, IgProfTrace::Stack *frame);
+  typedef void (*Formatter)(void *info, void *frame);
 
   /// Performance statistics for tracing.
   struct PerfStat
@@ -112,6 +117,8 @@ public:
   struct Stack
   {
     void        *address;       //< Instruction pointer value.
+    Formatter   formatter;
+
 #if DEBUG
     Stack       *parent;        //< The calling stack frame, or null for the root.
 #endif
@@ -191,12 +198,23 @@ public:
     Value       size;           //< Size of the resource.
   };
 
+  struct PyFrameState
+  {
+    const char *filename;
+    const char *name;
+    int firstlineno;
+    int lineno;
+    int id;
+    PyFrameState *next;
+  };
+
   IgProfTrace(void);
   ~IgProfTrace(void);
 
   void			reset(void);
   void                  lock(void);
   Stack *               push(void **stack, int depth);
+  Stack *               pushf(void **stack, int depth, Formatter *formatters);
   Counter *             tick(Stack *frame, CounterDef *def, Value amount, Value ticks);
   void                  acquire(Counter *ctr, Address resource, Value size);
   void                  release(Address resource);
@@ -205,12 +223,16 @@ public:
   void                  mergeFrom(IgProfTrace &other);
   void                  unlock(void);
 
+  void *                pyFrameState(const char *filename, const char *name,
+                                     int firstlineno, int lineno);
+
   Stack *               stackRoot(void) const;
   const PerfStat &      perfStats(void) const;
 
 private:
   void                  expandResourceHash(void);
-  Stack *               childStackNode(Stack *parent, void *address);
+  Stack *               childStackNode(Stack *parent, void *address,
+                                       Formatter formatter);
   void                  releaseResource(HResource *hres);
   void                  mergeFrom(int depth, Stack *frame, void **callstack);
 
@@ -225,6 +247,7 @@ private:
   Resource              *resfree_;      //< Resource free list.
   Stack                 *stack_;        //< Stack root.
   PerfStat		perfStats_;	//< Performance stats.
+  PyFrameState          *pyframes_;
 
 #if DEBUG
   static Counter        FREED;		//< Pseudo-counter used to mark free list.
@@ -418,7 +441,7 @@ IgProfTrace::releaseResource(HResource *hres)
     Be careful about trying to optimise things here - there is a fair
     chance of simply making things slower by adding complexity. */
 inline IgProfTrace::Stack *
-IgProfTrace::childStackNode(Stack *parent, void *address)
+IgProfTrace::childStackNode(Stack *parent, void *address, Formatter formatter)
 {
   // Search for the child's call address in the child stack frames.
   Stack **kid = &parent->children;
@@ -438,6 +461,7 @@ IgProfTrace::childStackNode(Stack *parent, void *address)
   Stack *next = *kid;
   Stack *k = *kid = allocate<Stack>();
   k->address = address;
+  k->formatter = formatter;
 #if DEBUG
   k->parent = parent;
 #endif
@@ -475,7 +499,45 @@ IgProfTrace::push(void **stack, int depth)
     else
     {
       // Look up this call stack child, then cache result.
-      frame = childStackNode(frame, address);
+      frame = childStackNode(frame, address, 0);
+      cache[i].address = address;
+      cache[i].frame = frame;
+      valid = 0;
+    }
+  }
+
+  return frame;
+}
+
+// TODO: Get rid of `push`.
+/** Locate stack frame record for a call tree. */
+inline IgProfTrace::Stack *
+IgProfTrace::pushf(void **stack, int depth, Formatter *formatters)
+{
+  // Make sure we operate on non-negative depth.  This allows callers
+  // to do strip off call tree layers without checking for sufficient
+  // depth themselves.
+  if (depth < 0)
+    depth = 0;
+
+  // Look up call stack in the cache.
+  StackCache    *cache = callcache_;
+  Stack         *frame = stack_;
+
+  for (int i = 0, valid = 1; i < depth && i < MAX_DEPTH; ++i)
+  {
+    void *address = stack[depth-i-1];
+    // This is needed because apparently unw_backtrace fills the last entry of
+    // the stack array with a 0 in case we are talking about the stacktrace of
+    // a (non-main) thread, resulting in a subsequent crash in childStackNode.
+    if (address == 0)
+      break;
+    else if (valid && cache[i].address == address)
+      frame = cache[i].frame;
+    else
+    {
+      // Look up this call stack child, then cache result.
+      frame = childStackNode(frame, address, formatters ? formatters[depth-i-1] : 0);
       cache[i].address = address;
       cache[i].frame = frame;
       valid = 0;

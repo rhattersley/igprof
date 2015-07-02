@@ -13,7 +13,8 @@ IgProfTrace::IgProfTrace(void)
     restable_(0),
     callcache_(0),
     resfree_(0),
-    stack_(0)
+    stack_(0),
+    pyframes_(0)
 {
   pthread_mutex_init(&mutex_, 0);
 
@@ -177,8 +178,8 @@ void
 IgProfTrace::debugDumpStack(Stack *s, int depth)
 {
   INDENT(2*depth);
-  fprintf(stderr, "STACK %d frame=%p addr=%p next=%p kids=%p\n",
-          depth, (void *)s, (void *)s->address,
+  fprintf(stderr, "STACK %d frame=%p addr=%p formatter=%p next=%p kids=%p\n",
+          depth, (void *)s, (void *)s->address, (void *)s->formatter,
           (void *)s->sibling, (void *)s->children);
 
   Counter **ptr = &s->counters[0];
@@ -213,4 +214,32 @@ IgProfTrace::debugDump(void)
 
   debugDumpStack(stack_, 0);
   // debugDumpResources();
+}
+
+void *
+IgProfTrace::pyFrameState(const char *filename, const char *name,
+                          int firstlineno, int lineno)
+{
+  PyFrameState *state = pyframes_;
+
+  while (state)
+  {
+    if (strcmp(state->filename, filename) == 0 &&
+        state->firstlineno == firstlineno && state->lineno == lineno)
+    {
+      return state;
+    }
+    state = state->next;
+  }
+  state = allocate<PyFrameState>();
+  // XXX Do we need a copy of the strings? Does CPython ever
+  // deallocate strings?
+  state->filename = strdup(filename);
+  state->name = strdup(name);
+  state->firstlineno = firstlineno;
+  state->lineno = lineno;
+  state->id = -1;
+  state->next = pyframes_;
+  pyframes_ = state;
+  return state;
 }

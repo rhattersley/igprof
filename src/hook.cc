@@ -686,8 +686,8 @@ findsym(const char *fn, const char *v, const char *lib,
     libraries, or failing that, in the main program itself.  On
     failure returns error code, otherwise sets @a sym and returns
     success. */
-static IgHook::Status
-lookup(const char *fn, const char *v, const char *lib, void *&sym)
+IgHook::Status
+IgHook::lookup(const char *fn, const char *v, const char *lib, void *&sym)
 {
   sym = 0;
 

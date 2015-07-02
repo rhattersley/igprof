@@ -177,12 +177,30 @@ freeThreadFlag(void *arg)
   delete (IgProfAtomic *) arg;
 }
 
-/** Dump out the profile data.  */
-static void
-dumpOneProfile(IgProfDumpInfo &info, IgProfTrace::Stack *frame)
+void formatPythonFrame(void *vinfo, void *vframe)
 {
-  if (info.depth) // No address at root
+  IgProfDumpInfo *info = (IgProfDumpInfo *)vinfo;
+  IgProfTrace::Stack *frame = (IgProfTrace::Stack *)vframe;
+  IgProfTrace::PyFrameState *state = (IgProfTrace::PyFrameState *)frame->address;
+  info->io.put("C").put(info->depth).put(" PFN");
+  if (state->id >= 0)
   {
+    info->io.put(state->id).put("+").put(state->lineno);
+  }
+  else
+  {
+    state->id = info->nsyms++;
+    info->io.put(state->id).put("=(PF?=(")
+        .put(state->filename, strlen(state->filename)).put(")+")
+        .put(state->firstlineno).put(" N=(")
+        .put(state->name, strlen(state->name)).put("))+").put(state->lineno);
+  }
+  info->io.put("\n");
+}
+
+static void
+formatCFrame(IgProfDumpInfo &info, IgProfTrace::Stack *frame)
+{
     IgProfSymCache::Symbol *sym = info.symcache->get(frame->address);
 
     if (LIKELY(sym->id >= 0))
@@ -269,11 +287,29 @@ dumpOneProfile(IgProfDumpInfo &info, IgProfTrace::Stack *frame)
       }
     }
     info.io.put("\n");
+}
+
+/** Dump out the profile data.  */
+static void
+dumpOneProfile(IgProfDumpInfo &info, IgProfTrace::Stack *frame)
+{
+  if (info.depth) // No address at root
+  {
+    if (frame->formatter)
+    {
+      frame->formatter(&info, frame);
+    }
+    else
+    {
+      formatCFrame(info, frame);
+    }
   }
 
   info.depth++;
   for (frame = frame->children; frame; frame = frame->sibling)
+  {
     dumpOneProfile(info, frame);
+  }
   info.depth--;
 }
 

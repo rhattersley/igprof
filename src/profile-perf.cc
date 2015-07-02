@@ -1,6 +1,20 @@
+// TODO: Decide if we want to use these at all!
+// Could do a symbol lookup on interp_head instead and define our own
+// structures where necessary? For example:
+//  if ((s = IgHook::lookup("interp_head", 0, 0, head)) != IgHook::Success)
+//  {
+//    igprof_debug("Fail! %d\n", s);
+//  }
+//  igprof_debug("Found! %p\n", head);
+//#include <Python.h>
+//#include <frameobject.h>
+#include "/home/richard/miniconda/include/python2.7/Python.h"
+#include "/home/richard/miniconda/include/python2.7/frameobject.h"
+
 #include "profile.h"
 #include "profile-trace.h"
 #include "hook.h"
+#include "sym-cache.h"
 #include "walk-syms.h"
 #include <cstdio>
 #include <cstdlib>
@@ -53,6 +67,7 @@ static void
 profileSignalHandler(int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
 {
   void *addresses[IgProfTrace::MAX_DEPTH];
+  IgProfTrace::Formatter formatters[IgProfTrace::MAX_DEPTH];
   if (LIKELY(igprof_disable()))
   {
     IgProfTrace *buf = igprof_buffer();
@@ -66,9 +81,54 @@ profileSignalHandler(int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
       depth = IgHookTrace::stacktrace(addresses, IgProfTrace::MAX_DEPTH);
       RDTSC(tend);
 
-      // Drop top two stackframes (me, signal frame).
       buf->lock();
-      frame = buf->push(addresses+2, depth-2);
+
+      // XXX Don't make a new cache each time!
+      IgProfSymCache symcache;
+      IgProfSymCache::Symbol *sym;
+      PyFrameObject *py_frame = 0;
+
+      // Start at 2 to ignore self and signal frames.
+      for (int i = 2; i < depth; ++i)
+      {
+        // NB. sym->name might be NULL
+        sym = symcache.get(addresses[i]);
+        if (sym->name && strcmp(sym->name, "PyEval_EvalFrameEx") == 0)
+        {
+          // Module
+          if (!py_frame)
+          {
+            py_frame = PyInterpreterState_Head()->tstate_head->frame;
+          }
+          PyCodeObject *code = py_frame->f_code;
+          PyStringObject *filename = (PyStringObject *)code->co_filename;
+          PyStringObject *name = (PyStringObject *)code->co_name;
+
+          // Doesn't seem like there are GIL implications - the frame
+          // is thread-specific, and we are in that thread.
+          int lineno = PyFrame_GetLineNumber(py_frame);
+
+          addresses[i] = buf->pyFrameState((const char *)filename->ob_sval,
+                                           (const char *)name->ob_sval,
+                                           code->co_firstlineno, lineno);
+          formatters[i] = formatPythonFrame;
+
+          py_frame = py_frame->f_back;
+        }
+        else
+        {
+          formatters[i] = 0;
+        }
+      }
+
+      // Drop top two stackframes (me, signal frame).
+      // Find the location in the tree which corresponds to the current
+      // call stack.
+      // NB. `frame` actually points to an `IgProfTrace::Stack`.
+      // `Stack` is a misleading name as it's actually a
+      // frame-specific node in a *tree*.
+      //frame = buf->push(addresses+2, depth-2, py_frame_states+2);
+      frame = buf->pushf(addresses+2, depth-2, formatters+2);
       buf->tick(frame, &s_ct_ticks, 1, 1);
       buf->traceperf(depth, tstart, tend);
       buf->unlock();
@@ -83,7 +143,8 @@ profileSignalHandler(int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
 static void
 enableTimer(void)
 {
-  itimerval interval = { { 0, 5000 }, { 0, 5000 } };
+  //itimerval interval = { { 0, 5000 }, { 0, 5000 } };
+  itimerval interval = { { 0, 500000 }, { 0, 500000 } };
   setitimer(s_itimer, &interval, 0);
 }
 

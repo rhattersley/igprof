@@ -31,6 +31,10 @@ HIDDEN void igprof_debug(const char *format, ...);
 HIDDEN int igprof_panic(const char *file, int line, const char *func, const char *expr);
 HIDDEN bool igprof_init(const char *id, void (*threadinit)(void),
 	                bool perthread, double clockres = 0.);
+// XXX HIDDEN??
+// TODO: Sort out circular depedencies.
+//void formatPythonFrame(IgProfDumpInfo *info, IgProfTrace::Stack *frame);
+void formatPythonFrame(void *info, void *frame);
 
 /** Return a profile buffer for a profiler in the current thread.  It
     is safe to call this function from any thread and in asynchronous
