@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from __future__ import division, print_function
 
 from collections import OrderedDict
@@ -19,6 +20,13 @@ def _parser():
                Word(alphanums).setResultsName('program_name') +
                Literal(') T=') + Word(nums + '.').setResultsName('interval') +
                Literal(')') + LineEnd())
+
+    # Engine name
+    #   E1=python
+    #   E1
+    engine_def = Literal('=') + Word(alphanums).setResultsName('engine_name')
+    engine = (Literal('E') + Word(hexnums).setResultsName('engine_num') +
+              Optional(engine_def))
 
     # Function name (may be anonymous)
     #   N=(Py_InitializeEx)
@@ -57,8 +65,9 @@ def _parser():
     #   Cf FN9+1ef
     #   C14 FN9=(F1+17715 N=(@?0x804c533))+0 V0=(PERF_TICKS):(1,1,1)
     #   C14 FN9=(F1+17715 N=(@?0x804c533))+0 V0:(4,4,4)
+    #   C14 E1=python FN9=(F1+58 N=(basename))+2
     call_frame = (Literal('C') + Word(hexnums).setResultsName('call_num') +
-                  function + Optional(value) + LineEnd())
+                  Optional(engine) + function + Optional(value) + LineEnd())
 
     item = program | call_frame
     return item
@@ -78,13 +87,15 @@ def _update_tree(root, stack):
             node = call
             node['children'] = OrderedDict()
             node['count'] = ticks
-            node['offset'] = call['offset']
             children[call_id] = node
 
 
 def _tree_from_igprof(filename):
     with open(filename) as f:
         item = _parser()
+
+        # A mapping from engine number to engine name.
+        engines = {}
 
         # A mapping from file number to filename.
         files = {}
@@ -104,6 +115,9 @@ def _tree_from_igprof(filename):
                 print(' ' * e.loc + '^')
                 exit()
             if result[0] == 'C':
+                engine = engines.setdefault(result.engine_num,
+                                            result.engine_name)
+
                 if result.func_num not in functions:
                     if result.file_num not in files:
                         files[result.file_num] = result.file_path
@@ -112,7 +126,8 @@ def _tree_from_igprof(filename):
                         'function': (result.func_name or result.anonymous)}
                 function = functions[result.func_num]
 
-                call = {'type': 'C', 'offset': result.func_offset}
+                call = {'type': 'C', 'offset': result.func_offset,
+                        'engine': engine}
                 call.update(function)
                 if result.ticks:
                     call['ticks'] = int(result.ticks, 16)
@@ -146,6 +161,36 @@ _NODE_ID_ITERATOR = itertools.count()
 _MAX = 1
 
 
+def _root_node(node, node_id, style, max_count):
+    label = '$ {}\n{} : 100%'.format(node['name'], node['count'])
+    style['shape'] = 'doublecircle'
+    return pydot.Node(node_id, label=label, **style)
+
+
+def _c_node(node, node_id, style, max_count):
+    label = '{} @ {}\n{} : {:.3g}%'.format(node['function'],
+                                           node['offset'],
+                                           node['count'],
+                                           node['count'] / _MAX * 100)
+    return pydot.Node(node_id, label=label, **style)
+
+
+def _python_node(node, node_id, style, max_count):
+    offset = int(node['offset'], 16)
+    label = '{}, line {}\n{} : {:.3g}%'.format(node['file'], offset,
+                                           node['count'],
+                                           node['count'] / _MAX * 100)
+    style['shape'] = 'box'
+    return pydot.Node(node_id, label=label, **style)
+
+
+_ENGINE_FORMATTERS = {
+    'ROOT': _root_node,
+    '': _c_node,
+    'python': _python_node
+}
+
+
 def _dump(graph, node, parent_id):
     node_id = next(_NODE_ID_ITERATOR)
     global _MAX
@@ -153,17 +198,11 @@ def _dump(graph, node, parent_id):
         _MAX = node['count']
     hue = 0.5 - (node['count'] / _MAX) / 2
     style = {'fillcolor': str(hue) + ' 1.0 1.0', 'style': 'filled'}
-    if node['type'] == 'ROOT':
-        name = node['name']
-    elif node['type'] == 'C':
-        name = node['function']
+    engine = node.get('engine', 'ROOT')
+    formatter = _ENGINE_FORMATTERS[engine]
+    graph.add_node(formatter(node, node_id, style, _MAX))
+    if engine != 'ROOT':
         graph.add_edge(pydot.Edge(parent_id, node_id))
-    else:
-        raise ValueError('Unknown node type')
-    label = '{} @ {}\n{} : {:.3g}%'.format(name, node.get('offset', '?'),
-                                           node['count'],
-                                           node['count'] / _MAX * 100)
-    graph.add_node(pydot.Node(node_id, label=label, **style))
     for child in node['children']:
         _dump(graph, child, node_id)
 
