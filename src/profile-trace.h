@@ -4,6 +4,7 @@
 # include "macros.h"
 # include "buffer.h"
 # include "profile.h"
+# include "sym-cache.h"
 # if DEBUG
 #  include "walk-syms.h"
 # endif
@@ -71,6 +72,8 @@ public:
   struct Counter;
   struct Resource;
   struct Record;
+
+  struct PyCode;
   struct PyFrameState;
 
   /// Deepest supported stack depth.
@@ -198,13 +201,19 @@ public:
     Value       size;           //< Size of the resource.
   };
 
-  struct PyFrameState
+  struct PyCode
   {
-    const char *filename;
+    IgProfSymCache::Binary *binary;
     const char *name;
     int firstlineno;
-    int lineno;
     int id;
+    PyCode *next;
+  };
+
+  struct PyFrameState
+  {
+    PyCode *code;
+    int lineno;
     PyFrameState *next;
   };
 
@@ -223,6 +232,9 @@ public:
   void                  mergeFrom(IgProfTrace &other);
   void                  unlock(void);
 
+  IgProfSymCache::Binary *getBinary(const char *filename);
+  PyCode *              getCode(IgProfSymCache::Binary *binary,
+                                const char *name, int firstlineno);
   void *                pyFrameState(const char *filename, const char *name,
                                      int firstlineno, int lineno);
 
@@ -247,6 +259,9 @@ private:
   Resource              *resfree_;      //< Resource free list.
   Stack                 *stack_;        //< Stack root.
   PerfStat		perfStats_;	//< Performance stats.
+
+  IgProfSymCache::Binary *binaries_;
+  PyCode                *pycodes_;
   PyFrameState          *pyframes_;
 
 #if DEBUG

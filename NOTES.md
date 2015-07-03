@@ -105,6 +105,8 @@ collapsed into a single node?
     * Use `sym-cache.cc: IgProfSymCache::get` on each frame in the call
       stack and check the name and binary name match `PyEval...` and
       `libpython...`.
+    * Hook `PyEval_EvalFrameEx` so it records (on a per-thread basis)
+      the frame numbers where it occurs.
 * How to deal with different CPython versions and any variances they
   have in their ABI? For example, changes to the layout of
   `PyInterpreterState`. Using accessor functions would help as long

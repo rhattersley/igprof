@@ -32,7 +32,7 @@ def _parser():
     #   N=(Py_InitializeEx)
     #   N=(@?0x7f1b9e6b1d73)
     anonymous = Literal('@?0x') + Word(hexnums).setResultsName('anonymous')
-    named = Word(alphanums + '_').setResultsName('func_name')
+    named = Word(alphanums + '_<>').setResultsName('func_name')
     name = Literal('N=(') + (anonymous | named) + Literal(')')
 
     # File position (via definition or reference)
@@ -162,25 +162,30 @@ _MAX = 1
 
 
 def _root_node(node, node_id, style, max_count):
-    label = '$ {}\n{} : 100%'.format(node['name'], node['count'])
+    label = '$ {node[name]}\n{node[count]} : 100%'.format(node=node)
     style['shape'] = 'doublecircle'
     return pydot.Node(node_id, label=label, **style)
 
 
 def _c_node(node, node_id, style, max_count):
-    label = '{} @ {}\n{} : {:.3g}%'.format(node['function'],
-                                           node['offset'],
-                                           node['count'],
-                                           node['count'] / _MAX * 100)
+    fmt = ('{node[function]} @ {node[offset]}\n'
+           '{node[count]} : {percent:.3g}%')
+    fmt = ('{node[file]} @ {node[offset]}\n'
+           '{node[function]}\n'
+           '{node[count]} : {percent:.3g}%')
+    label = fmt.format(node=node, percent=node['count'] / _MAX * 100)
+    style['shape'] = 'box'
     return pydot.Node(node_id, label=label, **style)
 
 
 def _python_node(node, node_id, style, max_count):
     offset = int(node['offset'], 16)
-    label = '{}, line {}\n{} : {:.3g}%'.format(node['file'], offset,
-                                           node['count'],
-                                           node['count'] / _MAX * 100)
-    style['shape'] = 'box'
+    fmt = ('{node[file]}, line {offset}\n'
+           '{node[function]}\n'
+           '{node[count]} : {percent:.3g}%')
+    label = fmt.format(node=node, offset=offset,
+                       percent=node['count'] / _MAX * 100)
+    style['shape'] = 'octagon'
     return pydot.Node(node_id, label=label, **style)
 
 

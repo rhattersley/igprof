@@ -216,16 +216,63 @@ IgProfTrace::debugDump(void)
   // debugDumpResources();
 }
 
+// TODO Check if we can use C++ standard containers.
+IgProfSymCache::Binary *
+IgProfTrace::getBinary(const char *filename)
+{
+  IgProfSymCache::Binary *binary = binaries_;
+  while (binary)
+  {
+    if (strcmp(binary->name, filename) == 0)
+    {
+      return binary;
+    }
+    binary = binary->next;
+  }
+  binary = allocate<IgProfSymCache::Binary>();
+  binary->next = binaries_;
+  binary->name = strdup(filename);
+  binary->id = -1;
+  binaries_ = binary;
+  return binary;
+}
+
+IgProfTrace::PyCode *
+IgProfTrace::getCode(IgProfSymCache::Binary *binary, const char *name,
+                     int firstlineno)
+{
+  PyCode *code = pycodes_;
+  while (code)
+  {
+    if (code->binary == binary && code->firstlineno == firstlineno)
+    {
+      return code;
+    }
+    code = code->next;
+  }
+  code = allocate<PyCode>();
+  code->next = pycodes_;
+  code->binary = binary;
+  code->name = strdup(name);
+  code->firstlineno = firstlineno;
+  code->id = -1;
+  pycodes_ = code;
+  return code;
+}
+
 void *
 IgProfTrace::pyFrameState(const char *filename, const char *name,
                           int firstlineno, int lineno)
 {
+  IgProfSymCache::Binary *binary = getBinary(filename);
+  PyCode *code = getCode(binary, name, firstlineno);
+
   PyFrameState *state = pyframes_;
 
+  // TODO Make it quicker - e.g. hash and/or sorted.
   while (state)
   {
-    if (strcmp(state->filename, filename) == 0 &&
-        state->firstlineno == firstlineno && state->lineno == lineno)
+    if (state->code == code && state->lineno == lineno)
     {
       return state;
     }
@@ -234,11 +281,8 @@ IgProfTrace::pyFrameState(const char *filename, const char *name,
   state = allocate<PyFrameState>();
   // XXX Do we need a copy of the strings? Does CPython ever
   // deallocate strings?
-  state->filename = strdup(filename);
-  state->name = strdup(name);
-  state->firstlineno = firstlineno;
+  state->code = code;
   state->lineno = lineno;
-  state->id = -1;
   state->next = pyframes_;
   pyframes_ = state;
   return state;

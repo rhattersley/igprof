@@ -182,20 +182,34 @@ void formatPythonFrame(void *vinfo, void *vframe)
   IgProfDumpInfo *info = (IgProfDumpInfo *)vinfo;
   IgProfTrace::Stack *frame = (IgProfTrace::Stack *)vframe;
   IgProfTrace::PyFrameState *state = (IgProfTrace::PyFrameState *)frame->address;
-  info->io.put("C").put(info->depth).put(" PFN");
-  if (state->id >= 0)
+  // TODO Don't repeat the E1 definition.
+  info->io.put("C").put(info->depth).put(" E1=python FN");
+  if (state->code->id >= 0)
   {
-    info->io.put(state->id).put("+").put(state->lineno);
+    info->io.put(state->code->id);
   }
   else
   {
-    state->id = info->nsyms++;
-    info->io.put(state->id).put("=(PF?=(")
-        .put(state->filename, strlen(state->filename)).put(")+")
-        .put(state->firstlineno).put(" N=(")
-        .put(state->name, strlen(state->name)).put("))+").put(state->lineno);
+    state->code->id = info->nsyms++;
+    // TODO: Sort out file IDs and re-use
+    info->io.put(state->code->id).put("=(F");
+    if (state->code->binary->id >= 0)
+    {
+        info->io.put(state->code->binary->id);
+    }
+    else
+    {
+        state->code->binary->id = info->nlibs++;
+        info->io.put(state->code->binary->id)
+            .put("=(")
+            .put(state->code->binary->name, strlen(state->code->binary->name))
+            .put(")");
+    }
+    info->io.put("+").put(state->code->firstlineno).put(" N=(")
+        .put(state->code->name, strlen(state->code->name))
+        .put("))");
   }
-  info->io.put("\n");
+  info->io.put("+").put(state->lineno).put("\n");
 }
 
 static void
